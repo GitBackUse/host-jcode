@@ -179,3 +179,60 @@
   --input: oklch(0.3 0.012 250);
   --ring: oklch(0.8 0.16 75);
 }
+
+/* ===== JCode Studio theme (aurora dark) ===== */
+.dark, :root {
+  --background: oklch(0.14 0.015 260);
+  --foreground: oklch(0.95 0.01 250);
+  --card: oklch(0.18 0.02 260 / 0.7);
+  --card-foreground: oklch(0.95 0.01 250);
+  --popover: oklch(0.18 0.02 260);
+  --popover-foreground: oklch(0.95 0.01 250);
+  --primary: oklch(0.86 0.17 160);
+  --primary-foreground: oklch(0.16 0.03 200);
+  --secondary: oklch(0.22 0.02 260);
+  --secondary-foreground: oklch(0.92 0.01 250);
+  --muted: oklch(0.21 0.02 260);
+  --muted-foreground: oklch(0.66 0.03 255);
+  --accent: oklch(0.72 0.17 290);
+  --accent-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 0.09);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.86 0.17 160);
+  --glow-a: oklch(0.86 0.17 160);
+  --glow-b: oklch(0.72 0.17 290);
+  --glow-c: oklch(0.78 0.14 220);
+  --gradient-brand: linear-gradient(120deg, var(--glow-a), var(--glow-c) 50%, var(--glow-b));
+}
+@theme inline {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-glow-a: var(--glow-a);
+  --color-glow-b: var(--glow-b);
+  --color-glow-c: var(--glow-c);
+}
+body { font-family: var(--font-sans); background: var(--background); }
+@utility text-brand {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+@utility bg-brand { background: var(--gradient-brand); }
+@utility glass {
+  background: color-mix(in oklab, var(--card) 100%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--border);
+}
+@utility aurora {
+  background:
+    radial-gradient(40% 50% at 15% 10%, color-mix(in oklab, var(--glow-a) 22%, transparent), transparent 70%),
+    radial-gradient(35% 45% at 85% 0%, color-mix(in oklab, var(--glow-b) 25%, transparent), transparent 70%),
+    radial-gradient(50% 50% at 50% 100%, color-mix(in oklab, var(--glow-c) 14%, transparent), transparent 70%),
+    var(--background);
+}
+@utility grid-fade {
+  background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+@keyframes floaty { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+@utility animate-floaty { animation: floaty 6s ease-in-out infinite; }
