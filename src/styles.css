@@ -153,3 +153,29 @@
     color: var(--color-foreground);
   }
 }
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Host JCode: terminal-amber dark theme */
+.dark {
+  --background: oklch(0.16 0.01 250);
+  --foreground: oklch(0.93 0.01 90);
+  --card: oklch(0.2 0.012 250);
+  --card-foreground: oklch(0.93 0.01 90);
+  --popover: oklch(0.2 0.012 250);
+  --popover-foreground: oklch(0.93 0.01 90);
+  --primary: oklch(0.8 0.16 75);
+  --primary-foreground: oklch(0.18 0.02 60);
+  --secondary: oklch(0.25 0.012 250);
+  --secondary-foreground: oklch(0.93 0.01 90);
+  --muted: oklch(0.23 0.01 250);
+  --muted-foreground: oklch(0.65 0.015 250);
+  --accent: oklch(0.28 0.02 250);
+  --accent-foreground: oklch(0.95 0.01 90);
+  --border: oklch(0.3 0.012 250);
+  --input: oklch(0.3 0.012 250);
+  --ring: oklch(0.8 0.16 75);
+}
