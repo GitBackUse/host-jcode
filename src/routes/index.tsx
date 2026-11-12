@@ -24,14 +24,14 @@ export const Route = createFileRoute("/")({
   component: Studio,
 });
 
-type Msg = { role: "user" | "model"; text: string; plan?: string[]; changed?: string[] };
-const MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
+type Msg = { role: "user" | "model"; text: string; plan?: string[] | undefined; changed?: string[] | undefined };
+const MODELS: string[] = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
 const IDEAS = ["A crypto portfolio dashboard with live charts", "A Pomodoro timer with ambient sounds", "A 3D product landing page for wireless earbuds", "A kanban board with drag and drop"];
 const LS = { key: "jcode.gemini", model: "jcode.model", files: "jcode.files", msgs: "jcode.msgs" };
 
 function Studio() {
   const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState(MODELS[0]);
+  const [model, setModel] = useState<string>("gemini-2.5-flash");
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [active, setActive] = useState("index.html");
@@ -46,7 +46,7 @@ function Studio() {
 
   useEffect(() => {
     setApiKey(localStorage.getItem(LS.key) ?? "");
-    setModel(localStorage.getItem(LS.model) ?? MODELS[0]);
+    setModel(localStorage.getItem(LS.model) ?? "gemini-2.5-flash");
     try { setFiles(JSON.parse(localStorage.getItem(LS.files) ?? "[]")); setMsgs(JSON.parse(localStorage.getItem(LS.msgs) ?? "[]")); } catch { /* ignore */ }
     setLoaded(true);
   }, []);

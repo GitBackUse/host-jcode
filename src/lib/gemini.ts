@@ -1,5 +1,5 @@
 export type ProjectFile = { path: string; content: string };
-export type AgentResult = { message: string; plan?: string[]; files: ProjectFile[] };
+export type AgentResult = { message: string; plan?: string[] | undefined; files: ProjectFile[] };
 
 const SYSTEM = `You are JCode, an elite senior full-stack engineer and product designer.
 You build complete, production-quality, visually stunning web apps as plain static files: index.html, style.css, script.js (add more files only if useful).
