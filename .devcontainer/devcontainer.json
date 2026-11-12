@@ -1,0 +1,19 @@
+{
+  "name": "Host JCode",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {},
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "hostRequirements": { "cpus": 2 },
+  "postCreateCommand": "bash .devcontainer/install-jcode.sh",
+  "postAttachCommand": "bash .devcontainer/welcome.sh",
+  "remoteEnv": {
+    "GEMINI_API_KEY": "${localEnv:GEMINI_API_KEY}",
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin:/home/vscode/.cargo/bin"
+  },
+  "customizations": {
+    "codespaces": { "openFiles": [".devcontainer/JCODE.md"] },
+    "vscode": { "settings": { "terminal.integrated.defaultProfile.linux": "bash" } }
+  }
+}
