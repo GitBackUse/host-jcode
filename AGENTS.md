@@ -28,3 +28,13 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Environment for JCode (AI agent read this)
+- You run as native jcode inside a GitHub Codespace: real Ubuntu Linux, 2 CPU cores, ~8GB RAM, ~32GB disk.
+- Installed: Node.js + npm, Python 3 + pip, Rust + cargo, Go, git, tmux, curl, apt (sudo works).
+- You can: install packages, compile and run code, run tests, start dev servers, use git (commit, branch, push to this repo).
+- Dev servers on ports 5173, 3000, 8080 are forwarded and previewable from the portal.
+- The repo is the permanent storage; anything not committed and pushed can be lost when the Codespace is deleted.
+- GitHub Pages hosts the portal (portal/); GitHub Actions deploys it on push to main.
+- The Codespace auto-stops when idle; free tier is limited hours per month, so keep work efficient.
+- AI key comes from the GEMINI_API_KEY Codespaces secret; never write keys into files.
