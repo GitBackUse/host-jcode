@@ -3,11 +3,21 @@
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
     "ghcr.io/devcontainers/features/rust:1": {},
-    "ghcr.io/devcontainers/features/node:1": {}
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/go:1": {}
   },
   "hostRequirements": { "cpus": 2 },
   "postCreateCommand": "bash .devcontainer/install-jcode.sh",
+  "postStartCommand": "bash .devcontainer/start-terminal.sh",
   "postAttachCommand": "bash .devcontainer/welcome.sh",
+  "forwardPorts": [7681, 5173, 3000, 8080],
+  "portsAttributes": {
+    "7681": { "label": "JCode web terminal", "visibility": "private", "onAutoForward": "silent" },
+    "5173": { "label": "App preview (Vite)", "onAutoForward": "notify" },
+    "3000": { "label": "App preview", "onAutoForward": "notify" },
+    "8080": { "label": "App preview", "onAutoForward": "notify" }
+  },
   "remoteEnv": {
     "GEMINI_API_KEY": "${localEnv:GEMINI_API_KEY}",
     "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin:/home/vscode/.cargo/bin"

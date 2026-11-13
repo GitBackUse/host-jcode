@@ -1,20 +1,65 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Host JCode — on-demand jcode</title>
+<title>Host JCode — real jcode in your browser</title>
+<meta name="description" content="Real jcode CLI on a free GitHub Codespace, auto-booted from this page.">
 <style>
-body{margin:0;font-family:ui-monospace,Menlo,monospace;background:#0d1110;color:#d7e4dc;display:flex;min-height:100vh;align-items:center;justify-content:center}
-main{max-width:560px;padding:28px}h1{color:#7cf2a8;margin:0 0 6px}p{color:#9fb3a8;line-height:1.5}
-a.b{display:block;text-align:center;background:#7cf2a8;color:#0d1110;padding:16px;border-radius:10px;font-weight:700;text-decoration:none;margin:18px 0 10px}
-a.s{display:block;text-align:center;border:1px solid #2c3a33;color:#d7e4dc;padding:12px;border-radius:10px;text-decoration:none;margin:8px 0}
-ol{color:#9fb3a8;padding-left:20px;line-height:1.7}code{color:#7cf2a8}
-</style></head><body><main>
-<h1>&gt; Host JCode</h1>
-<p>Real jcode, running in a GitHub Codespace only while you use it. Your code lives in this repository.</p>
-<a class="b" href="https://codespaces.new/GitBackUse/host-jcode?quickstart=1">▶ Start / Resume jcode</a>
-<a class="s" href="https://github.com/codespaces">Manage / stop running codespaces</a>
-<a class="s" href="https://github.com/settings/codespaces">Save Gemini key (secret GEMINI_API_KEY) &amp; idle timeout</a>
-<ol><li>Tap Start — first launch takes ~2–3 min, later resumes are fast.</li>
-<li>In the terminal type <code>jcode</code>.</li>
-<li>No secret saved? Run <code>jcode login --provider gemini</code>.</li>
-<li>Push your work with git, then close the tab. It auto-stops when idle.</li></ol>
-<p>Free tier: 60 core-hours/month (~30 h on a 2-core machine).</p>
-</main></body></html>
+:root{--bg:#07090c;--card:#0f141a;--line:#1e2833;--fg:#e6edf3;--mut:#8b9bab;--acc:#7cf2a8;--acc2:#5cc8ff;--bad:#ff7b72}
+*{box-sizing:border-box}body{margin:0;font-family:ui-sans-serif,system-ui;background:radial-gradient(1200px 600px at 80% -10%,#12324a55,transparent),radial-gradient(900px 500px at -10% 110%,#1d4a3355,transparent),var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{font:700 18px ui-monospace,monospace;margin:0;background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;color:transparent}
+.pill{font:12px ui-monospace,monospace;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.pill.on{color:var(--acc);border-color:#2b6a48}.pill.wait{color:#f2cc60}.pill.off{color:var(--bad)}
+button,a.btn{background:var(--card);color:var(--fg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px;text-decoration:none}
+button.p{background:linear-gradient(90deg,var(--acc),var(--acc2));color:#04110a;border:0;font-weight:700}
+.sp{flex:1}main{flex:1;display:flex;flex-direction:column}
+#term{flex:1;border:0;width:100%;min-height:70vh;background:#000;display:none}
+#boot{max-width:620px;margin:40px auto;padding:20px;text-align:center}
+#log{font:12px ui-monospace,monospace;color:var(--mut);text-align:left;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:220px;overflow:auto;white-space:pre-wrap}
+dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;max-width:440px;width:92%}
+input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#05080b;color:var(--fg);margin:6px 0 12px}
+small{color:var(--mut)}
+</style></head><body>
+<header><h1>&gt; Host JCode</h1><span id="st" class="pill">idle</span><span class="sp"></span>
+<button onclick="openPreview()">Preview app</button>
+<a class="btn" id="vs" target="_blank" href="#">VS Code</a>
+<button onclick="stopCs()">Stop</button>
+<button onclick="cfg.showModal()">Settings</button></header>
+<main><div id="boot"><p style="color:var(--mut)">Real jcode on a 2-core Linux machine. It wakes up automatically while you watch, and sleeps when you leave.</p>
+<button class="p" id="go" onclick="boot()">Connect</button><p></p><div id="log"></div></div>
+<iframe id="term" allow="clipboard-read; clipboard-write"></iframe></main>
+<dialog id="cfg"><h3>Settings</h3>
+<small>GitHub token (classic, scopes: <b>codespace</b>, <b>repo</b>). Stored only in this browser.</small>
+<input id="tok" type="password" placeholder="ghp_...">
+<small>Repository</small><input id="repo" value="GitBackUse/host-jcode">
+<small>Gemini key for jcode: save it at <a style="color:var(--acc)" target="_blank" href="https://github.com/settings/codespaces">Codespaces secrets</a> as GEMINI_API_KEY.</small><p></p>
+<button class="p" onclick="save()">Save</button> <button onclick="cfg.close()">Close</button></dialog>
+<script>
+const $=id=>document.getElementById(id),API="https://api.github.com";
+let cs=null;
+$('tok').value=localStorage.jcTok||'';$('repo').value=localStorage.jcRepo||'GitBackUse/host-jcode';
+function save(){localStorage.jcTok=$('tok').value.trim();localStorage.jcRepo=$('repo').value.trim();cfg.close();boot()}
+function log(m){$('log').textContent+=m+"\n";$('log').scrollTop=1e9}
+function st(t,c){$('st').textContent=t;$('st').className='pill '+(c||'')}
+async function gh(p,o={}){const r=await fetch(API+p,{...o,headers:{Authorization:'Bearer '+localStorage.jcTok,Accept:'application/vnd.github+json',...(o.body?{'Content-Type':'application/json'}:{})}});if(!r.ok&&r.status!==202)throw new Error(r.status+' '+(await r.text()).slice(0,160));return r.status===204?{}:r.json()}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function boot(){
+ if(!localStorage.jcTok){cfg.showModal();return}
+ $('go').disabled=true;st('finding codespace','wait');
+ try{
+  const repo=localStorage.jcRepo;
+  const list=await gh('/user/codespaces');
+  cs=list.codespaces.find(c=>c.repository.full_name.toLowerCase()===repo.toLowerCase());
+  if(!cs){log('No codespace yet — creating one (first boot ~3 min)...');cs=await gh(`/repos/${repo}/codespaces`,{method:'POST',body:JSON.stringify({machine:'basicLinux32gb'})}).catch(()=>gh(`/repos/${repo}/codespaces`,{method:'POST',body:'{}'}))}
+  $('vs').href=cs.web_url;
+  if(cs.state!=='Available'){log('Waking codespace ('+cs.state+')...');await gh(`/user/codespaces/${cs.name}/start`,{method:'POST'}).catch(e=>log(e.message))}
+  for(let i=0;i<120&&cs.state!=='Available';i++){st(cs.state.toLowerCase(),'wait');await sleep(5000);cs=await gh(`/user/codespaces/${cs.name}`)}
+  if(cs.state!=='Available')throw new Error('Codespace did not start in time');
+  log('Codespace ready. Opening jcode terminal...');st('online','on');
+  const url=`https://${cs.name}-7681.${cs.github_codespaces_port_forwarding_domain||'app.github.dev'}/`;
+  $('term').src=url;$('term').style.display='block';$('boot').style.display='none';
+  log('If the terminal asks you to sign in, open it once in a new tab: '+url);
+ }catch(e){st('error','off');log('⚠ '+e.message);$('go').disabled=false}
+}
+function openPreview(){if(!cs)return;const p=prompt('Preview port','5173');if(p)window.open(`https://${cs.name}-${p}.${cs.github_codespaces_port_forwarding_domain||'app.github.dev'}/`,'_blank')}
+async function stopCs(){if(!cs)return;await gh(`/user/codespaces/${cs.name}/stop`,{method:'POST'}).catch(e=>log(e.message));st('stopped','off');$('term').style.display='none';$('boot').style.display='block';$('go').disabled=false;log('Stopped. Free hours saved.')}
+if(localStorage.jcTok)boot();
+</script></body></html>
