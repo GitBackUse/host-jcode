@@ -38,3 +38,5 @@ use the editor.
 - GitHub Pages hosts the portal (portal/); GitHub Actions deploys it on push to main.
 - The Codespace auto-stops when idle; free tier is limited hours per month, so keep work efficient.
 - AI key comes from the GEMINI_API_KEY Codespaces secret; never write keys into files.
+- GitHub Pages serves a static SPA build of `src/components/Studio.tsx` via `vite.pages.config.ts` (entry `pages/`); keep Studio free of router/server-only imports so both builds work.
+- Codespace compute is reached through `.devcontainer/bridge.mjs` (port 8787, auth = owner's GitHub token checked against api.github.com); the Studio's Linux tab talks only to it.

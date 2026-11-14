@@ -2,7 +2,7 @@ name: Deploy JCode portal to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ["portal/**", ".github/workflows/pages.yml"]
+    paths: ["src/**", "pages/**", "vite.pages.config.ts", ".github/workflows/pages.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,9 +15,12 @@ jobs:
     environment: { name: github-pages, url: "${{ steps.d.outputs.page_url }}" }
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bunx vite build -c vite.pages.config.ts
       - uses: actions/configure-pages@v5
         with: { enablement: true }
       - uses: actions/upload-pages-artifact@v3
-        with: { path: portal }
+        with: { path: dist-pages }
       - id: d
         uses: actions/deploy-pages@v4

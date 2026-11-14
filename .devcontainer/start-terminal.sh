@@ -6,3 +6,7 @@ cd "${CODESPACE_VSCODE_FOLDER:-$PWD}"
 SHELL_CMD="tmux new -A -s jcode 'command -v jcode >/dev/null && jcode; exec bash'"
 nohup ttyd -p 7681 -W -t titleFixed=JCode -t fontSize=14 bash -lc "$SHELL_CMD" >/tmp/ttyd.log 2>&1 &
 echo "JCode web terminal running on port 7681"
+# Runner bridge used by the JCode Studio web page
+pkill -f "bridge.mjs" 2>/dev/null || true
+nohup node .devcontainer/bridge.mjs >/tmp/bridge.log 2>&1 &
+gh codespace ports visibility 8787:public -c "$CODESPACE_NAME" >/dev/null 2>&1 || true
