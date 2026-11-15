@@ -9,4 +9,9 @@ echo "JCode web terminal running on port 7681"
 # Runner bridge used by the JCode Studio web page
 pkill -f "bridge.mjs" 2>/dev/null || true
 nohup node .devcontainer/bridge.mjs >/tmp/bridge.log 2>&1 &
-gh codespace ports visibility 8787:public -c "$CODESPACE_NAME" >/dev/null 2>&1 || true
+# Make the bridge reachable from the Studio page (it checks your GitHub token itself).
+# Retry in the background because the port only exists once the bridge is listening.
+( for i in $(seq 1 30); do
+    gh codespace ports visibility 8787:public -c "$CODESPACE_NAME" >/tmp/ports.log 2>&1 && break
+    sleep 4
+  done ) &

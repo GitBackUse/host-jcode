@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { buildPreview, runAgent, type ProjectFile } from "@/lib/gemini";
 
-import { LinuxPanel } from "@/components/LinuxPanel";
+import { LinuxPanel, type LinuxJob } from "@/components/LinuxPanel";
 
 type Msg = { role: "user" | "model"; text: string; plan?: string[] | undefined; changed?: string[] | undefined };
 const MODELS: string[] = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
@@ -24,11 +24,13 @@ export function Studio() {
   const [active, setActive] = useState("index.html");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"preview" | "code" | "linux">("preview");
+  const [tab, setTab] = useState<"preview" | "code">("preview");
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [linux, setLinux] = useState<string | null>(null);
+  const [job, setJob] = useState<LinuxJob | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,14 +54,16 @@ export function Studio() {
     const history = msgs.map((m) => ({ role: m.role, text: m.text }));
     setMsgs((m) => [...m, { role: "user", text: p }]);
     try {
-      const r = await runAgent({ apiKey, model, prompt: p, files, history });
+      const r = await runAgent({ apiKey, model, prompt: p, files, history, linux });
       setFiles((prev) => {
         const map = new Map(prev.map((f) => [f.path, f]));
         r.files.forEach((f) => map.set(f.path, f));
         return [...map.values()];
       });
       if (r.files[0] && !files.length) setActive("index.html");
-      setMsgs((m) => [...m, { role: "model", text: r.message, plan: r.plan, changed: r.files.map((f) => f.path) }]);
+      if (linux != null && (r.files.length || r.commands.length)) setJob({ id: Date.now(), files: r.files, commands: r.commands });
+      const extra = r.commands.length ? `\n\nRunning on Linux:\n${r.commands.map((c) => "$ " + c).join("\n")}` : "";
+      setMsgs((m) => [...m, { role: "model", text: r.message + extra, plan: r.plan, changed: r.files.map((f) => f.path) }]);
       setTab("preview");
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
@@ -102,6 +106,8 @@ export function Studio() {
     </Dialog>
   );
 
+  const drawer = <LinuxPanel files={files} job={job} onLinux={setLinux} />;
+
   const header = (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 glass">
       <div className="flex items-center gap-2">
@@ -139,7 +145,7 @@ export function Studio() {
               <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 rows={3} placeholder="Build me a sleek habit tracker with streaks and dark mode…" className="w-full resize-none bg-transparent p-2 text-base outline-none placeholder:text-muted-foreground" />
               <div className="flex items-center justify-between">
-                <span className="pl-2 font-mono text-xs text-muted-foreground">{model}</span>
+                <span className="pl-2 font-mono text-xs text-muted-foreground">{model} · {linux != null ? "Linux mode" : "browser mode"}</span>
                 <Button onClick={() => send()} disabled={!prompt.trim()} className="gap-2 bg-brand text-primary-foreground"><Zap className="h-4 w-4" />Build</Button>
               </div>
             </div>
@@ -157,6 +163,7 @@ export function Studio() {
             ))}
           </div>
         </main>
+        <div className="relative z-10">{drawer}</div>
         {keyDialog}
       </div>
     );
@@ -201,9 +208,9 @@ export function Studio() {
         <section className="flex min-h-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
             <div className="flex rounded-lg border border-border p-0.5">
-              {(["preview", "code", "linux"] as const).map((t) => (
+              {(["preview", "code"] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)} className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs capitalize transition ${tab === t ? "bg-secondary text-foreground" : "text-muted-foreground"}`}>
-                  {t === "preview" ? <Eye className="h-3.5 w-3.5" /> : t === "code" ? <FileCode2 className="h-3.5 w-3.5" /> : <Terminal className="h-3.5 w-3.5" />}{t}
+                  {t === "preview" ? <Eye className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}{t}
                 </button>
               ))}
             </div>
@@ -216,7 +223,7 @@ export function Studio() {
             </div>
           </div>
 
-          {tab === "linux" ? <LinuxPanel files={files} /> : tab === "preview" ? (
+          {tab === "preview" ? (
             <div className="flex min-h-[50vh] flex-1 justify-center overflow-auto p-3">
               <iframe title="Preview" srcDoc={preview} sandbox="allow-scripts allow-forms allow-modals allow-popups"
                 style={{ width }} className="h-full rounded-xl border border-border bg-background shadow-[0_30px_80px_-30px_var(--glow-c)] transition-all" />
@@ -237,6 +244,7 @@ export function Studio() {
           )}
         </section>
       </div>
+      {drawer}
       {keyDialog}
     </div>
   );

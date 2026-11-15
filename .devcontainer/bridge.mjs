@@ -11,13 +11,18 @@ async function auth(req) {
   if (!r.ok) return false; const u = await r.json();
   if (OWNER && u.login !== OWNER) return false; ok.set(t, 1); return true;
 }
-const body = (req) => new Promise((res) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => res(d ? JSON.parse(d) : {})); });
-http.createServer(async (req, res) => {
+const body = (req) => new Promise((res) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => { try { res(d ? JSON.parse(d) : {}); } catch { res({}); } }); });
+http.createServer(async (req, res) => { try {
   res.setHeader("Access-Control-Allow-Origin", "*"); res.setHeader("Access-Control-Allow-Headers", "authorization,content-type");
   if (req.method === "OPTIONS") return res.end();
   if (!(await auth(req))) { res.statusCode = 401; return res.end("unauthorized"); }
   await fs.mkdir(ROOT, { recursive: true });
   if (req.url === "/health") return res.end("ok");
+  if (req.url === "/info") {
+    const v = (c) => new Promise((r) => { const p = spawn("bash", ["-lc", c]); let o = ""; p.stdout.on("data", (d) => (o += d)); p.on("close", () => r(o.trim())); });
+    const [node, py, rust, go, jc] = await Promise.all(["node -v", "python3 --version", "rustc --version", "go version", "command -v jcode && jcode --version 2>/dev/null | head -1"].map(v));
+    res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ node, py, rust, go, jcode: jc, root: ROOT }));
+  }
   if (req.url === "/files" && req.method === "POST") {
     const { files = [] } = await body(req);
     for (const f of files) { const p = path.resolve(ROOT, f.path); if (!p.startsWith(ROOT)) continue; await fs.mkdir(path.dirname(p), { recursive: true }); await fs.writeFile(p, f.content); }
@@ -31,4 +36,5 @@ http.createServer(async (req, res) => {
     p.on("close", (c) => res.end(`\n[exit ${c}]\n`)); req.on("close", () => p.kill()); return;
   }
   res.statusCode = 404; res.end();
+  } catch (e) { res.statusCode = 500; res.end(String(e)); }
 }).listen(8787, () => console.log("bridge on 8787"));
