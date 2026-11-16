@@ -44,7 +44,7 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
     fetch(API + p, { ...init, headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", ...(init?.headers ?? {}) } });
   const auth = () => ({ Authorization: `Bearer ${tok || localStorage.getItem(K.tok)}`, "Content-Type": "application/json" });
 
-  async function connect(t = tok, r = repo) {
+  async function connect(t = tok, r = repo, rebuilt = false) {
     if (!t.trim()) { setOpen(true); return; }
     localStorage.setItem(K.tok, t.trim()); localStorage.setItem(K.repo, r.trim());
     setBusyConn(true); setNeedAuth(false);
@@ -61,7 +61,7 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
         c = await res.json();
       }
       if (c!.state !== "Available" && c!.state !== "Starting") { setStatus("Waking up your machine (about 1 minute)…"); await gh(t, `/user/codespaces/${c!.name}/start`, { method: "POST" }); }
-      for (let i = 0; i < 120; i++) {
+      for (let i = 0; i < (rebuilt ? 120 : 48); i++) {
         const s: CS = await (await gh(t, `/user/codespaces/${c!.name}`)).json();
         setCs(s);
         if (s.state === "Available") {
@@ -77,6 +77,12 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
           setStatus("Machine is on, starting the runner…");
         } else setStatus(`Machine is ${s.state.toLowerCase()}…`);
         await new Promise((ok) => setTimeout(ok, 5000));
+      }
+      if (!rebuilt && c) {
+        setStatus("Old machine has no runner, rebuilding it automatically (3–5 minutes)…");
+        await gh(t, `/user/codespaces/${c.name}`, { method: "DELETE" });
+        await new Promise((ok) => setTimeout(ok, 8000));
+        setBusyConn(false); return connect(t, r, true);
       }
       throw new Error("Timed out waiting for the machine. Try Connect again.");
     } catch (e) { setStatus(e instanceof Error ? e.message : String(e)); setOpen(true); }
