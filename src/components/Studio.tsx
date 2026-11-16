@@ -32,6 +32,8 @@ export function Studio() {
   const [linux, setLinux] = useState<string | null>(null);
   const [job, setJob] = useState<LinuxJob | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
+  const fixTries = useRef(0);
+  const sendRef = useRef<(t: string, auto?: boolean) => void>(() => {});
 
   useEffect(() => {
     setApiKey(localStorage.getItem(LS.key) ?? "");
@@ -46,13 +48,24 @@ export function Studio() {
   const current = files.find((f) => f.path === active);
   const started = msgs.length > 0 || files.length > 0;
 
-  async function send(text = prompt) {
+  // Agent loop: when Linux commands fail, feed the output back to the AI to fix it (max 3 rounds).
+  function onJobDone(log: string) {
+    const failed = /\[exit [1-9]\d*\]|\[error\]/.test(log);
+    if (!failed) { fixTries.current = 0; toast.success("Everything ran successfully"); return; }
+    if (fixTries.current >= 3) { fixTries.current = 0; toast.error("Still failing after 3 auto-fix tries"); return; }
+    fixTries.current++;
+    toast(`Auto-fixing errors (try ${fixTries.current}/3)…`);
+    sendRef.current(`The commands failed on the Linux machine. Output:\n${log.slice(-6000)}\n\nFind the cause, fix the files, and give the commands to run again.`, true);
+  }
+
+  async function send(text = prompt, auto = false) {
     const p = text.trim();
     if (!p || busy) return;
+    if (!auto) fixTries.current = 0;
     if (!apiKey) { setKeyOpen(true); toast("Add your Gemini key to start building"); return; }
     setPrompt(""); setBusy(true);
     const history = msgs.map((m) => ({ role: m.role, text: m.text }));
-    setMsgs((m) => [...m, { role: "user", text: p }]);
+    setMsgs((m) => [...m, { role: "user", text: auto ? "🔧 Auto-fix: commands failed, fixing…" : p }]);
     try {
       const r = await runAgent({ apiKey, model, prompt: p, files, history, linux });
       setFiles((prev) => {
@@ -71,6 +84,7 @@ export function Studio() {
       toast.error("Generation failed");
     } finally { setBusy(false); }
   }
+  sendRef.current = (t, auto) => void send(t, auto);
 
   function saveKey() {
     localStorage.setItem(LS.key, keyDraft.trim()); setApiKey(keyDraft.trim());
@@ -106,7 +120,7 @@ export function Studio() {
     </Dialog>
   );
 
-  const drawer = <LinuxPanel files={files} job={job} onLinux={setLinux} />;
+  const drawer = <LinuxPanel files={files} job={job} onLinux={setLinux} onJobDone={onJobDone} />;
 
   const header = (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 glass">

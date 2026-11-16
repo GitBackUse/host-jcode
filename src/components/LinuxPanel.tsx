@@ -11,7 +11,7 @@ type CS = { name: string; state: string; web_url: string };
 export type LinuxJob = { id: number; files: ProjectFile[]; commands: string[] };
 
 /** Bottom drawer: wakes the user's GitHub Codespace and runs work there through the bridge on port 8787. */
-export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job: LinuxJob | null; onLinux: (info: string | null) => void }) {
+export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectFile[]; job: LinuxJob | null; onLinux: (info: string | null) => void; onJobDone?: (log: string) => void }) {
   const [open, setOpen] = useState(false);
   const [tok, setTok] = useState("");
   const [repo, setRepo] = useState("GitBackUse/host-jcode");
@@ -37,7 +37,7 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
   useEffect(() => {
     if (!job || job.id === lastJob.current || !ready) return;
     lastJob.current = job.id; setOpen(true);
-    void (async () => { await sync(job.files, true); for (const c of job.commands) await run(c); })();
+    void (async () => { await sync(job.files, true); let log = ""; for (const c of job.commands) log += `$ ${c}\n` + (await run(c)); onJobDone?.(log); })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job, ready]);
 
@@ -100,14 +100,15 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
   }
 
   async function run(c = cmd) {
-    if (!c.trim()) return;
+    if (!c.trim()) return "";
+    let got = "";
     setRunning(true); setOut((o) => o + `\n$ ${c}\n`);
     try {
       const r = await fetch(`${bridge}/run`, { method: "POST", headers: auth(), body: JSON.stringify({ cmd: c }) });
       const rd = r.body!.getReader(); const dec = new TextDecoder();
-      for (;;) { const { done, value } = await rd.read(); if (done) break; setOut((o) => o + dec.decode(value)); }
-    } catch (e) { setOut((o) => o + `\n[error] ${e instanceof Error ? e.message : e}\n`); }
-    setRunning(false); setCmd("");
+      for (;;) { const { done, value } = await rd.read(); if (done) break; const t = dec.decode(value); got += t; setOut((o) => o + t); }
+    } catch (e) { const t = `\n[error] ${e instanceof Error ? e.message : e}\n[exit 1]\n`; got += t; setOut((o) => o + t); }
+    setRunning(false); setCmd(""); return got;
   }
 
   async function browseUrl() {
