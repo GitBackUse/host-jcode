@@ -2,6 +2,7 @@
 // Every request must carry the owner's GitHub token; it is checked against GitHub.
 import http from "node:http"; import { spawn } from "node:child_process";
 import fs from "node:fs/promises"; import path from "node:path";
+import { browse } from "./steel.mjs";
 const ROOT = path.resolve(process.env.CODESPACE_VSCODE_FOLDER || process.cwd(), "workspace");
 const OWNER = process.env.GITHUB_USER; const ok = new Map();
 async function auth(req) {
@@ -21,12 +22,18 @@ http.createServer(async (req, res) => { try {
   if (req.url === "/info") {
     const v = (c) => new Promise((r) => { const p = spawn("bash", ["-lc", c]); let o = ""; p.stdout.on("data", (d) => (o += d)); p.on("close", () => r(o.trim())); });
     const [node, py, rust, go, jc] = await Promise.all(["node -v", "python3 --version", "rustc --version", "go version", "command -v jcode && jcode --version 2>/dev/null | head -1"].map(v));
-    res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ node, py, rust, go, jcode: jc, root: ROOT }));
+    res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ node, py, rust, go, jcode: jc, steel: !!process.env.STEEL_API_KEY, root: ROOT }));
   }
   if (req.url === "/files" && req.method === "POST") {
     const { files = [] } = await body(req);
     for (const f of files) { const p = path.resolve(ROOT, f.path); if (!p.startsWith(ROOT)) continue; await fs.mkdir(path.dirname(p), { recursive: true }); await fs.writeFile(p, f.content); }
     return res.end("ok");
+  }
+  if (req.url === "/browse" && req.method === "POST") {
+    const { url } = await body(req);
+    res.setHeader("Content-Type", "application/json");
+    try { return res.end(JSON.stringify(await browse(String(url || "")))); }
+    catch (e) { res.statusCode = 502; return res.end(JSON.stringify({ error: String(e.message || e) })); }
   }
   if (req.url === "/run" && req.method === "POST") {
     const { cmd } = await body(req);

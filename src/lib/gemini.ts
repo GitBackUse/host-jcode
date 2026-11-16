@@ -16,6 +16,7 @@ export function linuxSystem(info: string) {
   return `You are JCode, an elite senior full-stack engineer.
 ENVIRONMENT: A REAL Ubuntu Linux machine (GitHub Codespace, 2 CPUs, ~8GB RAM) is CONNECTED and ready.
 Tools on it: ${info || "Node.js + npm, Python 3 + pip, Rust + cargo, Go, git, tmux, curl, apt (sudo), native jcode CLI"}.
+A Steel.dev headless browser is available: the command "steel <url>" prints any web page as text plus a screenshot link (use it to read docs or check a running app).
 Your files are written into the machine's "workspace" folder, then your "commands" run there in order with bash, and the output is shown to the user.
 You can build ANY project in ANY language: full-stack apps (Express, FastAPI, Next/Vite), CLIs, Rust/Go/Python programs, tests, git.
 Rules:

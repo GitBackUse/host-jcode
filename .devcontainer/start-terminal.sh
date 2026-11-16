@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Starts a browser terminal on port 7681 that drops you straight into jcode.
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+# "steel <url>" command: headless browser for jcode and the Studio
+mkdir -p "$HOME/.local/bin" && ln -sf "$PWD/.devcontainer/steel.mjs" "$HOME/.local/bin/steel" && chmod +x .devcontainer/steel.mjs
 pkill -f "ttyd -p 7681" 2>/dev/null || true
 cd "${CODESPACE_VSCODE_FOLDER:-$PWD}"
 SHELL_CMD="tmux new -A -s jcode 'command -v jcode >/dev/null && jcode; exec bash'"

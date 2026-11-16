@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Play, Power, Upload, ExternalLink, ChevronUp, ChevronDown, Cpu, ShieldCheck } from "lucide-react";
+import { Loader2, Play, Power, Upload, ExternalLink, ChevronUp, ChevronDown, Cpu, ShieldCheck, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
   const [cmd, setCmd] = useState("");
   const [out, setOut] = useState("");
   const [running, setRunning] = useState(false);
+  const [shot, setShot] = useState("");
   const outRef = useRef<HTMLPreElement>(null);
   const lastJob = useRef(0);
   const bridge = cs ? `https://${cs.name}-8787.app.github.dev` : "";
@@ -109,6 +110,20 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
     setRunning(false); setCmd("");
   }
 
+  async function browseUrl() {
+    const url = window.prompt("Open which website in the headless browser?", "https://");
+    if (!url || url === "https://") return;
+    setRunning(true); setOut((o) => o + `\n🌐 browsing ${url}\n`);
+    try {
+      const r = await fetch(`${bridge}/browse`, { method: "POST", headers: auth(), body: JSON.stringify({ url }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || String(r.status));
+      setShot(d.screenshot || "");
+      setOut((o) => o + `# ${d.title}\n${String(d.markdown).slice(0, 4000)}\n`);
+    } catch (e) { setOut((o) => o + `[browser error] ${e instanceof Error ? e.message : e}\n`); }
+    setRunning(false);
+  }
+
   async function stop() {
     if (!cs) return;
     await gh(tok, `/user/codespaces/${cs.name}/stop`, { method: "POST" });
@@ -150,11 +165,17 @@ export function LinuxPanel({ files, job, onLinux }: { files: ProjectFile[]; job:
             {["npm install", "npx -y serve -l 3000 .", "python3 main.py", "cargo run", "go run .", "git status"].map((q) => (
               <Button key={q} size="sm" variant="ghost" className="font-mono text-xs" disabled={running} onClick={() => run(q)}>{q}</Button>
             ))}
+            <Button size="sm" variant="outline" disabled={running} onClick={browseUrl}><Globe className="h-3.5 w-3.5" />Browse web</Button>
             <span className="flex-1" />
             <Button size="sm" variant="ghost" asChild><a href={`https://${cs!.name}-7681.app.github.dev`} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" />jcode terminal</a></Button>
             <Button size="sm" variant="ghost" asChild><a href={`https://${cs!.name}-3000.app.github.dev`} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" />App :3000</a></Button>
             <Button size="sm" variant="ghost" onClick={stop}><Power className="h-3.5 w-3.5" />Stop</Button>
           </div>
+          {shot && (
+            <a href={shot} target="_blank" rel="noreferrer" className="block max-h-40 shrink-0 overflow-hidden rounded-xl border border-border">
+              <img src={shot} alt="Screenshot from the headless browser" className="w-full object-cover object-top" />
+            </a>
+          )}
           <pre ref={outRef} className="flex-1 overflow-auto rounded-xl border border-border bg-background/80 p-3 font-mono text-xs whitespace-pre-wrap">{out || "When the AI builds something, its files and commands run here automatically."}</pre>
           <div className="flex gap-2">
             <Input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !running && run()} placeholder="Any Linux command, e.g. jcode --help" className="font-mono" />
