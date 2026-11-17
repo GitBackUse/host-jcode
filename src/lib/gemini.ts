@@ -16,7 +16,7 @@ export function linuxSystem(info: string) {
   return `You are JCode, an elite senior full-stack engineer.
 ENVIRONMENT: A REAL Ubuntu Linux machine (GitHub Codespace, 2 CPUs, ~8GB RAM) is CONNECTED and ready.
 Tools on it: ${info || "Node.js + npm, Python 3 + pip, Rust + cargo, Go, git, tmux, curl, apt (sudo), native jcode CLI"}.
-A Steel.dev headless browser is available: the command "steel <url>" prints any web page as text plus a screenshot link (use it to read docs or check a running app).
+Only use tools reported available above. If Steel is available, "steel <url>" reads a page and returns a screenshot link. Never claim an unavailable tool is installed.
 Your files are written into the machine's "workspace" folder, then your "commands" run there in order with bash, and the output is shown to the user.
 You can build ANY project in ANY language: full-stack apps (Express, FastAPI, Next/Vite), CLIs, Rust/Go/Python programs, tests, git.
 Rules:
@@ -25,6 +25,7 @@ Rules:
 - Long-running servers: start them in background, e.g. "nohup npm run dev -- --host 0.0.0.0 --port 3000 > server.log 2>&1 &", and use port 3000, 5173 or 8080.
 - If the project is a static website, also keep index.html at the root so the in-browser preview works.
 - Give a short plan (3-6 bullets) first.
+- Include non-interactive verification commands after changing code; inspect failures before starting a server. Never delete the workspace, secrets, or unrelated repositories.
 Respond ONLY as JSON: {"plan": string[], "message": string, "files": [{"path": string, "content": string}], "commands": string[]}`;
 }
 
@@ -60,7 +61,15 @@ export async function runAgent(opts: {
   const text: string = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
   try {
     const parsed = JSON.parse(text.replace(/^```json\s*|```$/g, ""));
-    return { message: parsed.message ?? "Done.", plan: parsed.plan, files: Array.isArray(parsed.files) ? parsed.files : [], commands: Array.isArray(parsed.commands) ? parsed.commands.filter((c: unknown) => typeof c === "string") : [] };
+    return {
+      message: typeof parsed.message === "string" ? parsed.message : "Done.",
+      plan: Array.isArray(parsed.plan) ? parsed.plan.filter((p: unknown) => typeof p === "string") : undefined,
+      files: Array.isArray(parsed.files) ? parsed.files.filter((f: unknown): f is ProjectFile => {
+        if (!f || typeof f !== "object" || !("path" in f) || !("content" in f)) return false;
+        return typeof f.path === "string" && typeof f.content === "string" && !f.path.startsWith("/") && !f.path.split(/[\\/]/).some((s) => s === ".." || s === ".git");
+      }) : [],
+      commands: opts.linux != null && Array.isArray(parsed.commands) ? parsed.commands.filter((c: unknown) => typeof c === "string") : [],
+    };
   } catch {
     return { message: text || "No response.", files: [], commands: [] };
   }

@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { buildPreview, runAgent, type ProjectFile } from "@/lib/gemini";
 
 import { LinuxPanel, type LinuxJob } from "@/components/LinuxPanel";
+import { commandFailed, MAX_REPAIR_ATTEMPTS } from "@/lib/linux-jobs";
 
 type Msg = { role: "user" | "model"; text: string; plan?: string[] | undefined; changed?: string[] | undefined };
 const MODELS: string[] = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
@@ -31,6 +32,11 @@ export function Studio() {
   const [loaded, setLoaded] = useState(false);
   const [linux, setLinux] = useState<string | null>(null);
   const [job, setJob] = useState<LinuxJob | null>(null);
+  const [executing, setExecuting] = useState(false);
+  const [linuxPreview, setLinuxPreview] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<"browser" | "linux">("browser");
+  const inFlight = useRef(false);
+  const jobId = useRef(0);
   const chatEnd = useRef<HTMLDivElement>(null);
   const fixTries = useRef(0);
   const sendRef = useRef<(t: string, auto?: boolean) => void>(() => {});
@@ -50,9 +56,11 @@ export function Studio() {
 
   // Agent loop: when Linux commands fail, feed the output back to the AI to fix it (max 3 rounds).
   function onJobDone(log: string) {
-    const failed = /\[exit [1-9]\d*\]|\[error\]/.test(log);
+    setExecuting(false);
+    setMsgs((m) => [...m, { role: "model", text: log ? `Linux result:\n${log.slice(-6000)}` : "Files saved on Linux." }]);
+    const failed = commandFailed(log);
     if (!failed) { fixTries.current = 0; toast.success("Everything ran successfully"); return; }
-    if (fixTries.current >= 3) { fixTries.current = 0; toast.error("Still failing after 3 auto-fix tries"); return; }
+    if (fixTries.current >= MAX_REPAIR_ATTEMPTS) { fixTries.current = 0; toast.error("Still failing after 3 auto-fix tries"); return; }
     fixTries.current++;
     toast(`Auto-fixing errors (try ${fixTries.current}/3)…`);
     sendRef.current(`The commands failed on the Linux machine. Output:\n${log.slice(-6000)}\n\nFind the cause, fix the files, and give the commands to run again.`, true);
@@ -60,9 +68,10 @@ export function Studio() {
 
   async function send(text = prompt, auto = false) {
     const p = text.trim();
-    if (!p || busy) return;
+    if (!p || inFlight.current || (!auto && executing)) return;
     if (!auto) fixTries.current = 0;
     if (!apiKey) { setKeyOpen(true); toast("Add your Gemini key to start building"); return; }
+    inFlight.current = true;
     setPrompt(""); setBusy(true);
     const history = msgs.map((m) => ({ role: m.role, text: m.text }));
     setMsgs((m) => [...m, { role: "user", text: auto ? "🔧 Auto-fix: commands failed, fixing…" : p }]);
@@ -74,7 +83,11 @@ export function Studio() {
         return [...map.values()];
       });
       if (r.files[0] && !files.length) setActive("index.html");
-      if (linux != null && (r.files.length || r.commands.length)) setJob({ id: Date.now(), files: r.files, commands: r.commands });
+      if (linux != null && (r.files.length || r.commands.length)) {
+        jobId.current++;
+        setExecuting(true);
+        setJob({ id: jobId.current, files: r.files, commands: r.commands });
+      }
       const extra = r.commands.length ? `\n\nRunning on Linux:\n${r.commands.map((c) => "$ " + c).join("\n")}` : "";
       setMsgs((m) => [...m, { role: "model", text: r.message + extra, plan: r.plan, changed: r.files.map((f) => f.path) }]);
       setTab("preview");
@@ -82,7 +95,7 @@ export function Studio() {
       const err = e instanceof Error ? e.message : String(e);
       setMsgs((m) => [...m, { role: "model", text: `⚠ ${err}` }]);
       toast.error("Generation failed");
-    } finally { setBusy(false); }
+    } finally { inFlight.current = false; setBusy(false); }
   }
   sendRef.current = (t, auto) => void send(t, auto);
 
@@ -94,7 +107,7 @@ export function Studio() {
     const blob = new Blob([preview], { type: "text/html" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "jcode-app.html"; a.click();
   }
-  function reset() { if (confirm("Start a new project?")) { setFiles([]); setMsgs([]); } }
+  function reset() { if (!busy && !executing && confirm("Start a new project?")) { setFiles([]); setMsgs([]); setJob(null); } }
   function updateFile(content: string) { setFiles((fs) => fs.map((f) => (f.path === active ? { ...f, content } : f))); }
   function addFile() { const n = prompt_("File name (e.g. about.html)"); if (n && !files.some((f) => f.path === n)) { setFiles((f) => [...f, { path: n, content: "" }]); setActive(n); setTab("code"); } }
   function delFile(p: string) { setFiles((f) => f.filter((x) => x.path !== p)); }
@@ -120,7 +133,7 @@ export function Studio() {
     </Dialog>
   );
 
-  const drawer = <LinuxPanel files={files} job={job} onLinux={setLinux} onJobDone={onJobDone} />;
+  const drawer = <LinuxPanel files={files} job={job} onLinux={(info, url) => { setLinux(info); setLinuxPreview(url ?? null); if (!info) setPreviewMode("browser"); }} onJobDone={onJobDone} />;
 
   const header = (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 glass">
@@ -133,7 +146,7 @@ export function Studio() {
         <Button size="sm" variant="ghost" asChild title="Open real jcode in a Codespace">
           <a href="https://codespaces.new/GitBackUse/host-jcode?quickstart=1" target="_blank" rel="noreferrer"><Terminal className="h-4 w-4" /><span className="hidden sm:inline">jcode CLI</span></a>
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setKeyOpen(true)} className="gap-1.5">
+        <Button size="sm" variant="outline" aria-label="Gemini key settings" onClick={() => { setKeyDraft(apiKey); setKeyOpen(true); }} className="gap-1.5">
           <span className={`h-2 w-2 rounded-full ${apiKey ? "bg-primary shadow-[0_0_8px_var(--primary)]" : "bg-destructive"}`} />
           <span className="hidden sm:inline">{apiKey ? model : "Add Gemini key"}</span><KeyRound className="h-4 w-4 sm:hidden" />
         </Button>
@@ -186,11 +199,11 @@ export function Studio() {
   const width = device === "desktop" ? "100%" : device === "tablet" ? "768px" : "390px";
 
   return (
-    <div className="flex h-screen flex-col aurora">
+    <div className="flex h-[100dvh] min-w-0 flex-col overflow-hidden aurora">
       {header}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Chat */}
-        <aside className="flex max-h-[45vh] min-h-0 flex-col border-b border-border lg:max-h-none lg:w-[380px] lg:border-b-0 lg:border-r">
+        <aside className="flex max-h-[35dvh] min-h-0 min-w-0 shrink-0 flex-col border-b border-border lg:max-h-none lg:w-[380px] lg:border-b-0 lg:border-r">
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
             {msgs.map((m, i) => (
               <div key={i} className={m.role === "user" ? "ml-8 rounded-2xl rounded-tr-sm bg-secondary px-4 py-2.5 text-sm" : "text-sm"}>
@@ -200,7 +213,7 @@ export function Studio() {
                     {m.plan.map((s, j) => <li key={j} className="flex gap-2 text-xs text-muted-foreground"><span className="text-primary">✓</span>{s}</li>)}
                   </ul>
                 )}
-                <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+                <p className="break-words whitespace-pre-wrap leading-relaxed">{m.text}</p>
                 {m.changed && m.changed.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">{m.changed.map((c) => <button key={c} onClick={() => { setActive(c); setTab("code"); }} className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground hover:text-primary">{c}</button>)}</div>
                 )}
@@ -212,14 +225,14 @@ export function Studio() {
           <div className="border-t border-border p-3">
             <div className="flex items-end gap-2 rounded-xl border border-border p-2 glass focus-within:border-primary">
               <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                rows={2} placeholder="Ask for a change…" className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
-              <Button size="icon" onClick={() => send()} disabled={busy || !prompt.trim()} className="bg-brand text-primary-foreground"><Send className="h-4 w-4" /></Button>
+                rows={2} placeholder="Ask for a change…" className="min-w-0 flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+              <Button size="icon" aria-label="Send request" onClick={() => send()} disabled={busy || executing || !prompt.trim()} className="bg-brand text-primary-foreground"><Send className="h-4 w-4" /></Button>
             </div>
           </div>
         </aside>
 
         {/* Workspace */}
-        <section className="flex min-h-0 flex-1 flex-col">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
             <div className="flex rounded-lg border border-border p-0.5">
               {(["preview", "code"] as const).map((t) => (
@@ -236,14 +249,16 @@ export function Studio() {
               <Button size="icon" variant="ghost" className="h-8 w-8" asChild title="Repository"><a href="https://github.com/GitBackUse/host-jcode" target="_blank" rel="noreferrer"><Github className="h-4 w-4" /></a></Button>
             </div>
           </div>
+          {executing && <div role="status" className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" />Running on Linux…</div>}
+          {linuxPreview && tab === "preview" && <div className="flex gap-1 border-b border-border px-3 py-1"><Button size="sm" variant={previewMode === "browser" ? "secondary" : "ghost"} onClick={() => setPreviewMode("browser")}>Website</Button><Button size="sm" variant={previewMode === "linux" ? "secondary" : "ghost"} onClick={() => setPreviewMode("linux")}>Linux app :3000</Button></div>}
 
           {tab === "preview" ? (
-            <div className="flex min-h-[50vh] flex-1 justify-center overflow-auto p-3">
-              <iframe title="Preview" srcDoc={preview} sandbox="allow-scripts allow-forms allow-modals allow-popups"
+            <div className="flex min-h-0 flex-1 justify-center overflow-auto p-3">
+              <iframe key={previewMode} title="Preview" src={previewMode === "linux" ? linuxPreview ?? undefined : undefined} srcDoc={previewMode === "browser" ? preview : undefined} sandbox="allow-scripts allow-forms allow-modals allow-popups"
                 style={{ width }} className="h-full rounded-xl border border-border bg-background shadow-[0_30px_80px_-30px_var(--glow-c)] transition-all" />
             </div>
           ) : (
-            <div className="flex min-h-[50vh] flex-1">
+            <div className="flex min-h-0 flex-1">
               <div className="w-40 shrink-0 overflow-y-auto border-r border-border p-2 sm:w-48">
                 <div className="mb-2 flex items-center justify-between px-1 text-[10px] uppercase tracking-widest text-muted-foreground">Files<button onClick={addFile}><Plus className="h-3.5 w-3.5 hover:text-primary" /></button></div>
                 {files.map((f) => (
@@ -277,7 +292,7 @@ function CodeEditor({ value, onChange }: { value: string; onChange: (v: string) 
       <textarea value={value} spellCheck={false} onChange={(e) => onChange(e.target.value)}
         onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
         onKeyDown={(e) => { if (e.key === "Tab") { e.preventDefault(); const t = e.currentTarget; const s = t.selectionStart; onChange(value.slice(0, s) + "  " + value.slice(t.selectionEnd)); requestAnimationFrame(() => { t.selectionStart = t.selectionEnd = s + 2; }); } }}
-        className="flex-1 resize-none whitespace-pre bg-transparent py-3 pr-4 text-foreground outline-none" />
+        className="min-w-0 flex-1 resize-none whitespace-pre bg-transparent py-3 pr-4 text-foreground outline-none" />
     </div>
   );
 }

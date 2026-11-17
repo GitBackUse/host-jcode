@@ -7,14 +7,16 @@ const ROOT = path.resolve(process.env.CODESPACE_VSCODE_FOLDER || process.cwd(), 
 const OWNER = process.env.GITHUB_USER; const ok = new Map();
 async function auth(req) {
   const t = (req.headers.authorization || "").replace(/^Bearer /, ""); if (!t) return false;
-  if (ok.has(t)) return true;
+  if (!OWNER) return false;
+  if ((ok.get(t) || 0) > Date.now()) return true;
   const r = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${t}` } });
   if (!r.ok) return false; const u = await r.json();
-  if (OWNER && u.login !== OWNER) return false; ok.set(t, 1); return true;
+  if (u.login !== OWNER) return false; ok.set(t, Date.now() + 60000); return true;
 }
 const body = (req) => new Promise((res) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => { try { res(d ? JSON.parse(d) : {}); } catch { res({}); } }); });
 http.createServer(async (req, res) => { try {
   res.setHeader("Access-Control-Allow-Origin", "*"); res.setHeader("Access-Control-Allow-Headers", "authorization,content-type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") return res.end();
   if (!(await auth(req))) { res.statusCode = 401; return res.end("unauthorized"); }
   await fs.mkdir(ROOT, { recursive: true });
@@ -26,7 +28,18 @@ http.createServer(async (req, res) => { try {
   }
   if (req.url === "/files" && req.method === "POST") {
     const { files = [] } = await body(req);
-    for (const f of files) { const p = path.resolve(ROOT, f.path); if (!p.startsWith(ROOT)) continue; await fs.mkdir(path.dirname(p), { recursive: true }); await fs.writeFile(p, f.content); }
+    if (!Array.isArray(files)) { res.statusCode = 400; return res.end("Invalid file list"); }
+    for (const f of files) {
+      if (typeof f?.path !== "string" || typeof f?.content !== "string") { res.statusCode = 400; return res.end("Invalid file"); }
+      const p = path.resolve(ROOT, f.path);
+      if (!p.startsWith(ROOT + path.sep) || f.path.split(/[\\/]/).includes(".git")) { res.statusCode = 400; return res.end("Unsafe file path"); }
+      await fs.mkdir(path.dirname(p), { recursive: true });
+      const parent = await fs.realpath(path.dirname(p));
+      if (parent !== ROOT && !parent.startsWith(ROOT + path.sep)) { res.statusCode = 400; return res.end("Unsafe file directory"); }
+      const stat = await fs.lstat(p).catch(() => null);
+      if (stat?.isSymbolicLink()) { res.statusCode = 400; return res.end("Symbolic links cannot be overwritten"); }
+      await fs.writeFile(p, f.content);
+    }
     return res.end("ok");
   }
   if (req.url === "/browse" && req.method === "POST") {
@@ -37,10 +50,13 @@ http.createServer(async (req, res) => { try {
   }
   if (req.url === "/run" && req.method === "POST") {
     const { cmd } = await body(req);
+    if (typeof cmd !== "string" || !cmd.trim()) { res.statusCode = 400; return res.end("Invalid command"); }
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     const p = spawn("bash", ["-lc", cmd], { cwd: ROOT, env: process.env });
     p.stdout.on("data", (d) => res.write(d)); p.stderr.on("data", (d) => res.write(d));
-    p.on("close", (c) => res.end(`\n[exit ${c}]\n`)); req.on("close", () => p.kill()); return;
+    p.on("error", (e) => res.end(`\n[error] ${e.message}\n[exit 1]\n`));
+    p.on("close", (c) => { if (!res.writableEnded) res.end(`\n[exit ${c ?? 1}]\n`); });
+    res.on("close", () => { if (!res.writableEnded) p.kill(); }); return;
   }
   res.statusCode = 404; res.end();
   } catch (e) { res.statusCode = 500; res.end(String(e)); }

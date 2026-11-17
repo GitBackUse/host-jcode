@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ProjectFile } from "@/lib/gemini";
+import { executeLinuxJob } from "@/lib/linux-jobs";
 
 const API = "https://api.github.com";
 const K = { tok: "jcode.ghToken", repo: "jcode.ghRepo" };
@@ -11,7 +12,7 @@ type CS = { name: string; state: string; web_url: string };
 export type LinuxJob = { id: number; files: ProjectFile[]; commands: string[] };
 
 /** Bottom drawer: wakes the user's GitHub Codespace and runs work there through the bridge on port 8787. */
-export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectFile[]; job: LinuxJob | null; onLinux: (info: string | null) => void; onJobDone?: (log: string) => void }) {
+export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectFile[]; job: LinuxJob | null; onLinux: (info: string | null, previewUrl?: string) => void; onJobDone?: (log: string) => void }) {
   const [open, setOpen] = useState(false);
   const [tok, setTok] = useState("");
   const [repo, setRepo] = useState("GitBackUse/host-jcode");
@@ -26,6 +27,8 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
   const [shot, setShot] = useState("");
   const outRef = useRef<HTMLPreElement>(null);
   const lastJob = useRef(0);
+  const connecting = useRef(false);
+  const working = useRef(false);
   const bridge = cs ? `https://${cs.name}-8787.app.github.dev` : "";
 
   useEffect(() => {
@@ -37,7 +40,10 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
   useEffect(() => {
     if (!job || job.id === lastJob.current || !ready) return;
     lastJob.current = job.id; setOpen(true);
-    void (async () => { await sync(job.files, true); let log = ""; for (const c of job.commands) log += `$ ${c}\n` + (await run(c)); onJobDone?.(log); })();
+    working.current = true; setRunning(true);
+    void executeLinuxJob(job, (fs) => sync(fs, true), (c) => run(c, true)).then((log) => {
+      working.current = false; setRunning(false); onJobDone?.(log);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job, ready]);
 
@@ -45,9 +51,13 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
     fetch(API + p, { ...init, headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", ...(init?.headers ?? {}) } });
   const auth = () => ({ Authorization: `Bearer ${tok || localStorage.getItem(K.tok)}`, "Content-Type": "application/json" });
 
-  async function connect(t = tok, r = repo, rebuilt = false) {
+  async function connect(t = tok, r = repo) {
+    if (connecting.current) return;
     if (!t.trim()) { setOpen(true); return; }
+    t = t.trim(); r = r.trim();
+    if (!/^[\w.-]+\/[\w.-]+$/.test(r)) { setStatus("Enter a repository as owner/name"); return; }
     localStorage.setItem(K.tok, t.trim()); localStorage.setItem(K.repo, r.trim());
+    connecting.current = true; setReady(false); onLinux(null);
     setBusyConn(true); setNeedAuth(false);
     try {
       setStatus("Finding your machine…");
@@ -61,33 +71,37 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
         if (!res.ok) throw new Error(`Could not create the machine (${res.status}): ${(await res.text()).slice(0, 160)}`);
         c = await res.json();
       }
-      if (c!.state !== "Available" && c!.state !== "Starting") { setStatus("Waking up your machine (about 1 minute)…"); await gh(t, `/user/codespaces/${c!.name}/start`, { method: "POST" }); }
-      for (let i = 0; i < (rebuilt ? 120 : 48); i++) {
-        const s: CS = await (await gh(t, `/user/codespaces/${c!.name}`)).json();
+      if (!c?.name) throw new Error("GitHub did not return a machine name.");
+      if (c.state !== "Available" && c.state !== "Starting") {
+        setStatus("Waking up your machine (about 1 minute)…");
+        const start = await gh(t, `/user/codespaces/${c.name}/start`, { method: "POST" });
+        if (!start.ok) throw new Error(`Could not start the machine (${start.status}).`);
+      }
+      for (let i = 0; i < 120; i++) {
+        const response = await gh(t, `/user/codespaces/${c.name}`);
+        if (!response.ok) throw new Error(`Could not check the machine (${response.status}).`);
+        const s: CS = await response.json();
+        if (!s.name || !s.state) throw new Error("GitHub returned an invalid machine status.");
         setCs(s);
         if (s.state === "Available") {
           try {
-            const p = await fetch(`https://${s.name}-8787.app.github.dev/info`, { headers: { Authorization: `Bearer ${t}` } });
+            const p = await fetch(`https://${s.name}-8787.app.github.dev/info`, { headers: { Authorization: `Bearer ${t}` }, signal: AbortSignal.timeout(10000) });
             if (p.ok) {
-              const info = await p.json().catch(() => ({}));
-              const txt = [info.node && `Node ${info.node}`, info.py, info.rust, info.go, info.jcode ? "jcode CLI installed" : ""].filter(Boolean).join(", ");
-              setReady(true); setStatus("Linux machine connected · AI now builds full projects here"); onLinux(txt);
+              const info = await p.json();
+              if (!info.root || !info.node) throw new Error("Runner is not ready");
+              const txt = [info.node, info.py, info.rust, info.go, info.jcode ? "jcode CLI installed" : "jcode CLI unavailable", info.steel ? "Steel browser available" : "Steel browser unavailable", `Workspace: ${info.root}`].filter(Boolean).join(", ");
+              setReady(true); setStatus("Linux machine connected · AI now builds full projects here"); onLinux(txt, `https://${s.name}-3000.app.github.dev`);
               toast.success("Linux machine connected"); return;
             }
+            if (i > 6) setNeedAuth(true);
           } catch { if (i > 6) setNeedAuth(true); }
           setStatus("Machine is on, starting the runner…");
         } else setStatus(`Machine is ${s.state.toLowerCase()}…`);
         await new Promise((ok) => setTimeout(ok, 5000));
       }
-      if (!rebuilt && c) {
-        setStatus("Old machine has no runner, rebuilding it automatically (3–5 minutes)…");
-        await gh(t, `/user/codespaces/${c.name}`, { method: "DELETE" });
-        await new Promise((ok) => setTimeout(ok, 8000));
-        setBusyConn(false); return connect(t, r, true);
-      }
-      throw new Error("Timed out waiting for the machine. Try Connect again.");
+      throw new Error("Runner did not respond. Your machine and files were preserved. Open the machine to check its startup, then retry.");
     } catch (e) { setStatus(e instanceof Error ? e.message : String(e)); setOpen(true); }
-    finally { setBusyConn(false); }
+    finally { connecting.current = false; setBusyConn(false); }
   }
 
   async function sync(fs = files, quiet = false) {
@@ -96,19 +110,22 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
       if (!r.ok) throw new Error(String(r.status));
       setOut((o) => o + `\n▸ ${fs.length} files written to the machine\n`);
       if (!quiet) toast.success("Files sent to the machine");
-    } catch { toast.error("Could not send files"); }
+    } catch (e) { if (!quiet) toast.error("Could not send files"); throw e; }
   }
 
-  async function run(c = cmd) {
+  async function run(c = cmd, jobCommand = false) {
     if (!c.trim()) return "";
+    if (working.current && !jobCommand) return "";
     let got = "";
     setRunning(true); setOut((o) => o + `\n$ ${c}\n`);
     try {
       const r = await fetch(`${bridge}/run`, { method: "POST", headers: auth(), body: JSON.stringify({ cmd: c }) });
-      const rd = r.body!.getReader(); const dec = new TextDecoder();
+      if (!r.ok) throw new Error(`Runner rejected command (${r.status})`);
+      if (!r.body) throw new Error("Runner returned no output stream");
+      const rd = r.body.getReader(); const dec = new TextDecoder();
       for (;;) { const { done, value } = await rd.read(); if (done) break; const t = dec.decode(value); got += t; setOut((o) => o + t); }
     } catch (e) { const t = `\n[error] ${e instanceof Error ? e.message : e}\n[exit 1]\n`; got += t; setOut((o) => o + t); }
-    setRunning(false); setCmd(""); return got;
+    if (!jobCommand) setRunning(false); setCmd(""); return got;
   }
 
   async function browseUrl() {
@@ -127,27 +144,30 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
 
   async function stop() {
     if (!cs) return;
-    await gh(tok, `/user/codespaces/${cs.name}/stop`, { method: "POST" });
-    setReady(false); onLinux(null); setStatus("Machine stopped · saving your free hours");
+    try {
+      const response = await gh(tok, `/user/codespaces/${cs.name}/stop`, { method: "POST" });
+      if (!response.ok) throw new Error(`Could not stop machine (${response.status})`);
+      setReady(false); onLinux(null); setStatus("Machine stopped · saving your free hours");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not stop machine"); }
   }
 
   const dot = ready ? "bg-primary shadow-[0_0_8px_var(--primary)]" : busyConn ? "bg-accent animate-pulse" : "bg-muted-foreground";
 
   return (
     <div className="shrink-0 border-t border-border glass">
-      <button onClick={() => setOpen((o) => !o)} className="flex h-9 w-full items-center gap-2 px-3 text-xs">
+      <Button variant="ghost" aria-label="Linux machine" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex h-9 w-full items-center gap-2 px-3 text-xs">
         <span className={`h-2 w-2 rounded-full ${dot}`} />
         <Cpu className="h-3.5 w-3.5 text-primary" />
         <span className="font-medium">Linux</span>
         <span className="truncate text-muted-foreground">{busyConn && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}{status}</span>
         <span className="flex-1" />
         {open ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-      </button>
+      </Button>
       {open && (!ready ? (
         <div className="mx-auto flex max-w-xl flex-col gap-2 p-4 pt-1">
           <p className="text-xs text-muted-foreground">Paste a GitHub token once (permissions: <b>codespace</b> and <b>repo</b>, no expiration). It stays saved in this browser and connects automatically every time you open the page.</p>
           <div className="flex gap-2">
-            <Input type="password" placeholder="ghp_..." value={tok} onChange={(e) => setTok(e.target.value)} className="font-mono" />
+            <Input aria-label="GitHub token" type="password" placeholder="ghp_..." value={tok} onChange={(e) => setTok(e.target.value)} className="font-mono" />
             <Button onClick={() => connect()} disabled={!tok.trim() || busyConn} className="bg-brand text-primary-foreground">{busyConn ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}</Button>
           </div>
           <Input value={repo} onChange={(e) => setRepo(e.target.value)} className="font-mono text-xs" />
@@ -160,27 +180,27 @@ export function LinuxPanel({ files, job, onLinux, onJobDone }: { files: ProjectF
           )}
         </div>
       ) : (
-        <div className="flex h-[38vh] flex-col gap-2 p-3 pt-0">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <Button size="sm" variant="outline" onClick={() => sync()}><Upload className="h-3.5 w-3.5" />Send files</Button>
+        <div className="flex h-[38dvh] min-h-0 flex-col gap-2 p-3 pt-0">
+          <div className="flex max-h-[14dvh] shrink-0 flex-wrap items-center gap-1.5 overflow-y-auto text-xs lg:max-h-none">
+            <Button size="sm" variant="outline" disabled={running} onClick={() => { void sync().catch(() => {}); }}><Upload className="h-3.5 w-3.5" />Send files</Button>
             {["npm install", "npx -y serve -l 3000 .", "python3 main.py", "cargo run", "go run .", "git status"].map((q) => (
               <Button key={q} size="sm" variant="ghost" className="font-mono text-xs" disabled={running} onClick={() => run(q)}>{q}</Button>
             ))}
             <Button size="sm" variant="outline" disabled={running} onClick={browseUrl}><Globe className="h-3.5 w-3.5" />Browse web</Button>
             <span className="flex-1" />
-            <Button size="sm" variant="ghost" asChild><a href={`https://${cs!.name}-7681.app.github.dev`} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" />jcode terminal</a></Button>
-            <Button size="sm" variant="ghost" asChild><a href={`https://${cs!.name}-3000.app.github.dev`} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" />App :3000</a></Button>
-            <Button size="sm" variant="ghost" onClick={stop}><Power className="h-3.5 w-3.5" />Stop</Button>
+            <Button size="sm" variant="ghost" asChild><a href={`https://${cs?.name}-7681.app.github.dev`} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" />jcode terminal</a></Button>
+            <Button size="sm" variant="ghost" asChild><a href={`https://${cs?.name}-3000.app.github.dev`} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" />App :3000</a></Button>
+            <Button size="sm" variant="ghost" disabled={running} onClick={stop}><Power className="h-3.5 w-3.5" />Stop</Button>
           </div>
           {shot && (
             <a href={shot} target="_blank" rel="noreferrer" className="block max-h-40 shrink-0 overflow-hidden rounded-xl border border-border">
               <img src={shot} alt="Screenshot from the headless browser" className="w-full object-cover object-top" />
             </a>
           )}
-          <pre ref={outRef} className="flex-1 overflow-auto rounded-xl border border-border bg-background/80 p-3 font-mono text-xs whitespace-pre-wrap">{out || "When the AI builds something, its files and commands run here automatically."}</pre>
-          <div className="flex gap-2">
-            <Input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !running && run()} placeholder="Any Linux command, e.g. jcode --help" className="font-mono" />
-            <Button onClick={() => run()} disabled={running} className="bg-brand text-primary-foreground">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}</Button>
+          <pre ref={outRef} className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-background/80 p-3 font-mono text-xs whitespace-pre-wrap">{out || "When the AI builds something, its files and commands run here automatically."}</pre>
+          <div className="flex shrink-0 gap-2">
+            <Input aria-label="Linux command" value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !running && run()} placeholder="Any Linux command, e.g. jcode --help" className="font-mono" />
+            <Button aria-label="Run command" onClick={() => run()} disabled={running} className="bg-brand text-primary-foreground">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}</Button>
           </div>
         </div>
       ))}
